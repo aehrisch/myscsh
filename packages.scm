@@ -26,11 +26,13 @@
   (files enum-set))
 
 (define-structure mysql-low (export)
-  (open scheme-with-scsh
+  (open (modify scheme-with-scsh
+		(hide select format))
 	define-record-types
 	threads
-	bitwise byte-vectors
+	finite-types enum-sets enum-sets-internal
+	ascii bitwise byte-vectors
 
 	rendezvous rendezvous-channels
-	srfi-11 srfi-23)
+	srfi-11 srfi-23 srfi-28 srfi-42)
   (files mysql))

@@ -1,3 +1,6 @@
+(define (msg . args)
+  (display (apply format args)))
+
 (define-record-type connection :connection
   (make-connection socket in-channel out-port)
   connection?
@@ -76,6 +79,32 @@
 		(error "Corrupted package" read body-len))
 	    bv))))))
 
+(define (format-byte byte)
+  (let ((str (number->string byte 16)))
+    (if (< byte 16)
+	(string-append "0" str)
+	str)))
+
+(define (print-packet packet)
+  (do-ec (:range i 0 (byte-vector-length packet))
+	 (begin
+	   (msg "~a  " (format-byte (byte-vector-ref packet i)))
+	   (if (zero? (remainder (+ i 1) 10))
+	       (newline))))
+  (newline))
+
+(define (byte-vector->string bv)
+  (let ((s (make-string (byte-vector-length bv))))
+    (do-ec (:range i 0 (byte-vector-length bv))
+	   (string-set! s i (ascii->char (byte-vector-ref bv i))))
+    s))
+
+(define (write-packet conn packet)
+  (let ((port (connection-out-port conn)))
+    (write-string (byte-vector->string packet) port)
+    ;(send-message port (byte-vector->string packet))
+    (force-output port)))
+ 
 (define (read-null-terminated-string bv start)
   (let ((len (byte-vector-length bv)))
     (let lp ((str "") (index start))
@@ -138,6 +167,25 @@
     (byte-vector-set! 
      bv i (string-ref str j))))
 
+;;; decode server greeting
+
+;;; taken from mysql_com.h CLIENT_* version 4.1.20
+
+(define-enumerated-type client-option :client-option
+  client-option?
+  client-options
+  client-option-name
+  client-option-index
+  (long-password found-rows long-flag connect-with-db
+   no-schema compress odbc local-files ignore-space
+   protocol-41 interactive ssl ignore-sigpipe transactions
+   reserver secure-connection multi-statements multi-results))
+
+(define-enum-set-type option-set :option-set
+  option-set?
+  make-option-set
+  client-option client-option? client-options client-option-index)
+
 (define-record-type greeting :greeting
   (make-greeting protocol-ver server-ver
 		 thread-id salt capabilities
@@ -165,7 +213,8 @@
 	 ((salt index)
 	  (read-null-terminated-string bv (+ index 4)))
 	 ((capabilities)
-	  (read-16Bit-integer bv index))
+	  (integer->enum-set :option-set
+			     (read-16Bit-integer bv index)))
 	 ((charset)
 	  (read-8Bit-integer bv (+ index 2)))
 	 ((status)
@@ -175,6 +224,105 @@
       (make-greeting
        proto-ver server-version thread-id
        salt capabilities charset status rest-salt))))
+
+(define (byte-vector->list bv)
+  (list-ec (:range i (byte-vector-length bv))
+	   (number->string (byte-vector-ref bv i) 16)))
+
+(define (extract-byte int index)
+  (bitwise-and (arithmetic-shift int (* -8 index)) 255))
+
+(define (make-bit-copy-function no-bytes)
+  (lambda (bv int offset)
+    (do-ec (:range i no-bytes) 
+	   (byte-vector-set! 
+	    bv (+ offset i) (extract-byte int i)))))
+  
+(define copy-8Bit-integer!
+  (make-bit-copy-function 1))
+
+(define copy-16Bit-integer!
+  (make-bit-copy-function 2))
+
+(define copy-24Bit-integer!
+  (make-bit-copy-function 3))
+
+(define copy-32Bit-integer!
+  (make-bit-copy-function 4))
+
+(define (no-of-elements lst)
+  (sum-ec (: l lst) (length l)))
+
+(define packet-header-length 4)
+
+(define (copy-packet-header! packet length seq-no)
+  (copy-24Bit-integer! packet length 0)
+  (copy-8Bit-integer! packet seq-no 3))
+
+;; 85 A6 03 00
+(define standard-client-options
+  (make-option-set (list (client-option long-password)
+			 (client-option long-flag)
+			 (client-option transactions)
+			 (client-option interactive)
+			 (client-option local-files)
+			 (client-option protocol-41)
+			 (client-option secure-connection)
+			 (client-option multi-statements)
+			 (client-option multi-results))))
+
+(define (copy-bytes! bv offset lst)
+  (do-ec (:list b (index i) lst)
+	 (byte-vector-set! bv (+ offset i) b)))
+
+(define (make-single-message seq-no . bytes)
+  (let* ((packet-length (no-of-elements bytes))
+	 (packet (make-byte-vector 
+		  (+ packet-header-length packet-length) 0)))
+    (copy-packet-header! packet packet-length seq-no)
+    (let lp ((bytes bytes) (index packet-header-length))
+      (cond ((null? bytes)
+	     packet)
+	    (else
+	     (copy-bytes! packet index (car bytes))
+	     (lp (cdr bytes) (+ index (length (car bytes)))))))))
+  
+(define (make-null-bytes count)
+  (list-ec (:range ignore count) 0))
+
+(define (make-encode-integer-function no-bytes)
+  (lambda (int)
+    (list-ec (:range i no-bytes) 
+	     (extract-byte int i))))
+
+(define encode-8Bit-integer
+  (make-encode-integer-function 1))
+
+(define encode-32Bit-integer
+  (make-encode-integer-function 4))
+
+;;; we don't care about encoding...
+(define (encode-string str)
+  (list-ec (:string c (string-append str (string (ascii->char 0))))
+	   (char->ascii c)))
+
+(define (encode-password pwd)
+  (list 0))
+
+(define (encode-capabilities option-set)
+  (encode-32Bit-integer (enum-set->integer option-set)))
+
+(define (make-client-auth-message seq-no
+				  capabilities max-packet-size
+				  charset user password)
+  (make-single-message
+   seq-no
+   (encode-capabilities capabilities)
+   (encode-32Bit-integer max-packet-size)
+   (encode-8Bit-integer charset)
+   (make-null-bytes 23)
+   (encode-string user)
+   (encode-password password)))
 
 (define (to-ip-address string-or-number)
   (cond
@@ -197,3 +345,23 @@
      sock
      (port->channel (socket:inport sock))
      (socket:outport sock))))
+
+;;; test code
+(define (do-login)
+
+  (define conn 
+    (open-mysql-tcp-connection "localhost" 3306))
+
+  (define greet 
+    (read-server-greeting conn 60000))
+
+  (define auth-packet 
+    (make-client-auth-message
+     1
+     standard-client-options
+     (expt 2 24)
+     8
+     "root"
+     #f))
+
+  (write-packet conn auth-packet))
