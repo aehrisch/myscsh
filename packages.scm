@@ -1,3 +1,6 @@
+;;; enum-sets
+;;; #########
+
 (define-interface enum-sets-interface
   (export (define-enum-set-type :syntax)
           enum-set->list
@@ -25,6 +28,9 @@
   (optimize auto-integrate)
   (files enum-set))
 
+;;; mysql-low
+;;; #########
+
 (define-structure mysql-low (export)
   (open (modify scheme-with-scsh
 		(hide select format))
@@ -36,3 +42,16 @@
 	rendezvous rendezvous-channels
 	srfi-11 srfi-23 srfi-28 srfi-42)
   (files mysql))
+
+;;; sha1
+;;; ####
+
+(define-interface sha1-interface
+  (export sha1-hash-string
+	  sha1-hash-byte-vector))
+
+(define-structure sha1 sha1-interface
+  (open scheme
+	bitwise byte-vectors ascii 
+	srfi-28)
+  (files sha1))
