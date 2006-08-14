@@ -1,14 +1,3 @@
-;;; ,open bitwise byte-vectors ascii srfi-28
-
-(define (string->byte-vector str)
-  (let* ((len (string-length str))
-	 (bv (make-byte-vector len 0)))
-    (do ((i 0 (+ i 1)))
-	((>= i len) bv)
-      (byte-vector-set! bv i 
-			(char->ascii
-			 (string-ref str i))))))
-
 ;;; make a mask with COUNT 1 bits shifted START bits left
 (define (make-extract-mask start count)
   (let lp ((count count) (mask 0))
@@ -67,34 +56,43 @@
 (define (enough-space-for-length-info? last-block-len)
   (<= last-block-len 56))
 
-;;; add padding to BLOCK such that BLOCK is BLOCK-LEN bits long.
-(define (pad-block block block-len)
-  (let* ((count (count-bits block)))
-    (bitwise-ior
-     (arithmetic-shift block (- block-len count))
-     (arithmetic-shift #b1 (- (- block-len count) 1)))))
+;;; add padding to BLOCK
+(define (pad-block block unused-bits)
+  (bitwise-ior
+   (arithmetic-shift block unused-bits)
+   (arithmetic-shift #b1 (- unused-bits 1))))
 
-;;; copy 64 bits for the message length to the end of a block
-(define (add-message-len len block)
-  (+ block len))
-
-(define (finish-blocks blocks maybe-last-block last-block-len)
-  'ficken)
-
-;  (if (enough-space-for-length-info? last-block-len)
-  
-;;; convert a byte-vector into a list of blocks (which are 512 bit
-;;; integers)
-(define (byte-vector->blocks bv)
-  (let ((len (byte-vector-length bv)))
-    (let lp ((i 0) (blocks '()))
-      (cond
-       ((>= (+ i 64) len)
-	(let* ((last-block-len (- len i))
-	       (maybe-last-block (bytes->block bv i last-block-len)))
-	  (finish-blocks blocks maybe-last-block last-block-len)))
-       (else
-	(lp (+ i 64) (cons (bytes->block bv i 64) blocks)))))))
+(define (prepare-message! blocks unused-bits total-message-len)
+  (let* ((len (vector-length blocks))
+	 (spare-block-index (- len 1))
+	 (last-block-index (- len 2))
+	 (last-block (vector-ref blocks last-block-index)))
+   (cond
+    ((>= unused-bits (+ 64 1))
+     ;; there is enough space to store the message length in the last
+     ;; block
+     (vector-set! blocks
+		  last-block-index
+		  ;(+ (pad-block last-block 512) total-message-len))
+		  (+ (pad-block last-block unused-bits) total-message-len))
+     last-block-index)
+    ((zero? unused-bits)
+     ;; we need the spare block.  There is no space to pad the last
+     ;; block.
+     (vector-set! blocks
+		  spare-block-index
+		  ;(+ (pad-block 0 512) total-message-len))
+		  (+ (pad-block 0 unused-bits) total-message-len))
+     spare-block-index)
+    (else
+     ;; we need the spare block. First pad the last-block to 512 bits
+     (vector-set! blocks
+		  last-block-index
+		  ;(pad-block last-block 512))
+		  (pad-block last-block unused-bits))
+     ;; Now write the length into the spare block
+     (vector-set! blocks spare-block-index total-message-len)
+     spare-block-index))))
 
 ;;; generate a vector with masks that decompose a 512-bit block into
 ;;; 16 32-bit words (stored in a vector)
@@ -199,7 +197,6 @@
 ;;; SHA1 main loop
 (define (sha1-loop extended-words h0 h1 h2 h3 h4)
   (let lp ((i 0) (a h0) (b h1) (c h2) (d h3) (e h4))
-    (display-state i a b c d e)
     (if (= i 80)
 	(values a b c d e)
 	(lp (+ i 1)
@@ -213,13 +210,13 @@
 	    c
 	    d))))
 
-(define (calculate-sha1 blocks)
-  (let lp ((blocks blocks)
+(define (calculate-sha1 blocks last-index)
+  (let lp ((index 0)
 	   (h0 #x67452301) (h1 #xefcdab89) (h2 #x98badcfe)
 	   (h3 #x10325476) (h4 #xc3d2e1f0))
-    (if (null? blocks)
+    (if (> index last-index)
 	(append-hash h0 h1 h2 h3 h4)
-	(let* ((block (car blocks))
+	(let* ((block (vector-ref blocks index))
 	       (word-blocks (split-block block))
 	       (extended-words (extend-word-blocks word-blocks)))
 	  (call-with-values
@@ -231,5 +228,42 @@
 		    (h2 (mod2+ h2 c))
 		    (h3 (mod2+ h3 d))
 		    (h4 (mod2+ h4 e)))
-		(lp (cdr blocks) h0 h1 h2 h3 h4))))))))
+		(lp (+ index 1) h0 h1 h2 h3 h4))))))))
 
+(define (string->byte-vector str)
+  (let* ((len (string-length str))
+	 (bv (make-byte-vector len 0)))
+    (do ((i 0 (+ i 1)))
+	((>= i len) bv)
+      (byte-vector-set! bv i 
+			(char->ascii
+			 (string-ref str i))))))
+
+;;; returns a vector of blocks (a block is a 512 bit integer) and the
+;;; number of unused bits in the last block.
+(define (byte-vector->blocks bv)
+  (let* ((bytes (byte-vector-length bv))
+	 (vec (make-vector (+ 1 (+ 1 (quotient bytes (quotient 512 8)))) 0))
+	 (bits 0))
+    ;; the last element is a spare element---just needed if the
+    ;; message length doesn't fit into the last message block.
+    (do ((i 0 (+ i 64))
+	 (j 0 (+ j 1)))
+	((> (+ i 64) bytes)
+	 (vector-set! vec j (bytes->block bv i (- bytes i)))
+	 (values vec 
+		 (* 8 (- 64 (- bytes i))) 
+		 (+ bits (* 8 (- bytes i)))))
+      (set! bits (+ bits 512))
+      (vector-set! vec j (bytes->block bv i 64)))))
+
+(define (sha1-hash-string str)
+  (sha1-hash-byte-vector (string->byte-vector str)))
+
+(define (sha1-hash-byte-vector bv)
+  (call-with-values
+      (lambda ()
+	(byte-vector->blocks bv))
+    (lambda (blocks unused-bits total-length)
+      (let ((last-index (prepare-message! blocks unused-bits total-length)))
+	(calculate-sha1 blocks last-index)))))
