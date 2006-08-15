@@ -43,15 +43,11 @@
 			(list bv count))))))))))
 
 (define (parse-packet-header bv)
-  (let ((byte (lambda (i)
-		(byte-vector-ref bv i))))
-    (values
-     ;; body length
-     (+ (byte 0) 
-	(arithmetic-shift (byte 1) 8)
-	(arithmetic-shift (byte 2) 16))
-     ;; packet sequence number
-     (byte 3))))
+  (values
+   ;; body length
+   (read-24Bit-integer bv 0)
+   ;; packet sequence number
+   (read-8Bit-integer bv 3)))
 
 (define (read-packet-header channel timeout)
   (let ((header-len 4))
@@ -137,6 +133,8 @@
 (define read-24Bit-integer (make-read-integer 3))
 
 (define read-32Bit-integer (make-read-integer 4))
+
+(define read-64Bit-integer (make-read-integer 8))
 
 (define (integer->octets int bytes)
   (let lp ((res '()) (shift (* 8 (- bytes 1))))
