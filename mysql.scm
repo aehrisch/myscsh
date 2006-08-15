@@ -341,6 +341,12 @@
    (encode-string user)
    (encode-password (encrypt-password password salt))))
 
+;;; decoding result messages
+
+(define (simple-ok-response? bv)
+  (and (= (byte-vector-length bv) 1)
+       (= (byte-vector-ref bv 0) 254)))
+
 (define (to-ip-address string-or-number)
   (cond
    ((string? string-or-number)
@@ -381,4 +387,6 @@
      "eric" "abc"
      (greeting-salt greet)))
 
-  (write-packet conn auth-packet))
+  (write-packet conn auth-packet)
+  
+  (simple-ok-response? (read-packet conn 6000)))
