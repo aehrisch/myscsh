@@ -48,7 +48,9 @@
 
 (define-interface sha1-interface
   (export sha1-hash-string
-	  sha1-hash-byte-vector))
+	  sha1-hash-byte-vector
+
+	  hash-value->byte-vector))
 
 (define-structure sha1 sha1-interface
   (open scheme

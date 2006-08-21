@@ -267,3 +267,26 @@
     (lambda (blocks unused-bits total-length)
       (let ((last-index (prepare-message! blocks unused-bits total-length)))
 	(calculate-sha1 blocks last-index)))))
+
+(define (make-hash-as-bytes-mask)
+  (let* ((len (quotient 160 8))
+	 (vec (make-vector len 0)))
+    (do ((i 0 (+ i 8))
+	 (j 0 (+ j 1)))
+	((>= i 160) vec)
+      (vector-set! vec j (make-extract-mask i 8)))))
+
+(define hash-as-bytes-masks
+  (make-hash-as-bytes-mask))
+
+(define (hash-value->byte-vector int)
+  (let* ((len (vector-length hash-as-bytes-masks))
+ 	 (bv (make-byte-vector len 0)))
+     (do ((i 0 (+ i 1)))
+ 	((>= i len) bv)
+       (byte-vector-set!
+        bv (- (- len 1) i)
+	(arithmetic-shift
+	 (bitwise-and (vector-ref hash-as-bytes-masks i)
+		      int)
+	 (- (* i 8)))))))
