@@ -39,6 +39,7 @@
 	finite-types enum-sets enum-sets-internal
 	ascii bitwise byte-vectors
 
+	sha1
 	rendezvous rendezvous-channels
 	srfi-11 srfi-23 srfi-28 srfi-42)
   (files mysql))

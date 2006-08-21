@@ -227,7 +227,7 @@
 
 (define (byte-vector->list bv)
   (list-ec (:range i (byte-vector-length bv))
-	   (number->string (byte-vector-ref bv i) 16)))
+	   (byte-vector-ref bv i)))
 
 (define (extract-byte int index)
   (bitwise-and (arithmetic-shift int (* -8 index)) 255))
@@ -306,15 +306,36 @@
   (list-ec (:string c (string-append str (string (ascii->char 0))))
 	   (char->ascii c)))
 
-(define (encode-password pwd)
-  (list 0))
-
 (define (encode-capabilities option-set)
   (encode-32Bit-integer (enum-set->integer option-set)))
 
+(define (encode-password password)
+  (cons #x14 ;;; length of the password
+	(byte-vector->list password)))
+
+(define (encrypt-password password salt)
+  (let* ((hashed-pw (sha1-hash-string password))
+	 (hashed-pw-bytes (hash-value->byte-vector hashed-pw))
+	 (double-hashed-pw
+	  (hash-value->byte-vector
+	   (sha1-hash-byte-vector
+	    (hash-value->byte-vector hashed-pw))))
+	 (message-plain (string-append salt 
+				       (byte-vector->string double-hashed-pw)))
+	 (message-hashed (hash-value->byte-vector
+			  (sha1-hash-string message-plain)))
+	 (len (byte-vector-length message-hashed))
+	 (res (make-byte-vector len 0)))
+    (do ((i 0 (+ i 1)))
+	((= i len) res)
+      (byte-vector-set! 
+       res i
+       (bitwise-xor (byte-vector-ref hashed-pw-bytes i)
+		    (byte-vector-ref message-hashed i))))))
+
 (define (make-client-auth-message seq-no
 				  capabilities max-packet-size
-				  charset user password)
+				  charset user password salt)
   (make-single-message
    seq-no
    (encode-capabilities capabilities)
@@ -322,7 +343,7 @@
    (encode-8Bit-integer charset)
    (make-null-bytes 23)
    (encode-string user)
-   (encode-password password)))
+   (encode-password (encrypt-password password salt))))
 
 (define (to-ip-address string-or-number)
   (cond
@@ -361,7 +382,7 @@
      standard-client-options
      (expt 2 24)
      8
-     "root"
-     #f))
+     "eric" "abc"
+     (greeting-salt greet)))
 
   (write-packet conn auth-packet))
