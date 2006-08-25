@@ -117,28 +117,26 @@
 	(lp (string-append str (string (ascii->char (byte-vector-ref bv index))))
 	    (+ index 1)))))))
 
-(define (read-8Bit-integer bv start)
-  (if (> (+ start 1) (byte-vector-length bv))
-      (error "Can't read integer" bv start))
-  (byte-vector-ref bv start))
+(define (make-read-integer int-len)
+  (lambda (bv start)
+    (if (> (+ start int-len) (byte-vector-length bv))
+	(error (format "Can't read integer (~a bytes) at index ~a" 
+		       int-len start bv)))
+    (let ((byte (lambda (i)
+		  (byte-vector-ref bv (+ start i)))))
+      (let lp ((index 0) (int 0))
+	(if (= index int-len)
+	    int
+	    (lp (+ index 1) 
+		(+ int (arithmetic-shift (byte index) (* 8 index)))))))))
 
-(define (read-16Bit-integer bv start)
-  (if (> (+ start 2) (byte-vector-length bv))
-      (error "Can't read integer" bv start))
-  (let ((byte (lambda (i)
-		(byte-vector-ref bv (+ start i)))))
-    (+ (byte 0)
-       (arithmetic-shift (byte 1) 8))))
+(define read-8Bit-integer (make-read-integer 1))
 
-(define (read-32Bit-integer bv start)
-  (if (> (+ start 4) (byte-vector-length bv))
-      (error "Can't read integer" bv start))
-  (let ((byte (lambda (i)
-		(byte-vector-ref bv (+ start i)))))
-    (+ (byte 0)
-       (arithmetic-shift (byte 1) 8)
-       (arithmetic-shift (byte 2) 16)
-       (arithmetic-shift (byte 3) 24))))
+(define read-16Bit-integer (make-read-integer 2))
+
+(define read-24Bit-integer (make-read-integer 3))
+
+(define read-32Bit-integer (make-read-integer 4))
 
 (define (integer->octets int bytes)
   (let lp ((res '()) (shift (* 8 (- bytes 1))))
