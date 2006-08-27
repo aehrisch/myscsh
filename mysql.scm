@@ -82,18 +82,15 @@
 	str)))
 
 (define (print-packet packet)
-  (do-ec (:range i 0 (byte-vector-length packet))
-	 (begin
-	   (msg "~a  " (format-byte (byte-vector-ref packet i)))
-	   (if (zero? (remainder (+ i 1) 10))
-	       (newline))))
+  (do-ec (:byte-vector b (index i) packet)
+    (begin
+      (msg "~a  " (format-byte b))
+      (if (zero? (remainder (+ i 1) 10))
+	  (newline))))
   (newline))
 
 (define (byte-vector->string bv)
-  (let ((s (make-string (byte-vector-length bv))))
-    (do-ec (:range i 0 (byte-vector-length bv))
-	   (string-set! s i (ascii->char (byte-vector-ref bv i))))
-    s))
+  (string-ec (:byte-vector b bv) (ascii->char b)))
 
 (define (write-packet conn packet)
   (let ((port (connection-out-port conn)))
@@ -118,13 +115,9 @@
     (if (> (+ start int-len) (byte-vector-length bv))
 	(error (format "Can't read integer (~a bytes) at index ~a" 
 		       int-len start bv)))
-    (let ((byte (lambda (i)
-		  (byte-vector-ref bv (+ start i)))))
-      (let lp ((index 0) (int 0))
-	(if (= index int-len)
-	    int
-	    (lp (+ index 1) 
-		(+ int (arithmetic-shift (byte index) (* 8 index)))))))))
+    (sum-ec (:range i 0 int-len)
+      (arithmetic-shift (byte-vector-ref bv (+ start i))
+			(* 8 (+ start i))))))
 
 (define read-8Bit-integer (make-read-integer 1))
 
@@ -322,12 +315,10 @@
 			  (sha1-hash-string message-plain)))
 	 (len (byte-vector-length message-hashed))
 	 (res (make-byte-vector len 0)))
-    (do ((i 0 (+ i 1)))
-	((= i len) res)
-      (byte-vector-set! 
-       res i
-       (bitwise-xor (byte-vector-ref hashed-pw-bytes i)
-		    (byte-vector-ref message-hashed i))))))
+    (byte-vector-ec 
+	(:byte-vector h hashed-pw-bytes)
+        (:byte-vector m message-hashed)
+      (bitwise-xor h m))))
 
 (define (make-client-auth-message seq-no
 				  capabilities max-packet-size
