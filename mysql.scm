@@ -129,25 +129,6 @@
 
 (define read-64Bit-integer (make-read-integer 8))
 
-(define (integer->octets int bytes)
-  (let lp ((res '()) (shift (* 8 (- bytes 1))))
-    (display shift) (newline)
-    (cond
-     ((< shift 0)
-      res)
-     (else
-      (lp (cons (bitwise-and 
-		 (arithmetic-shift int (- shift))
-		 255)
-		res)
-	  (- shift 8))))))
-
-(define (copy-integer-to-bv! bv int index bytes)
-  (do ((i index (+ i 1))
-       (octets (integer->octets int bytes) (cdr octets)))
-      ((null? octets) (values))
-      (byte-vector-set! bv i (car octets))))
-
 (define (copy-string-to-bv! bv str index)
   (do ((i index (+ i 1))
        (j 0 (+ j 0)))
