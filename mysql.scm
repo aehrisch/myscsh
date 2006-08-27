@@ -234,12 +234,8 @@
   (make-option-set (list (client-option long-password)
 			 (client-option long-flag)
 			 (client-option transactions)
-			 (client-option interactive)
-			 (client-option local-files)
 			 (client-option protocol-41)
-			 (client-option secure-connection)
-			 (client-option multi-statements)
-			 (client-option multi-results))))
+			 (client-option secure-connection))))
 
 (define (copy-bytes! bv offset lst)
   (do-ec (:list b (index i) lst)
@@ -272,9 +268,12 @@
   (make-encode-integer-function 4))
 
 ;;; we don't care about encoding...
-(define (encode-string str)
+(define (encode-string-with-null str)
   (list-ec (:string c (string-append str (string (ascii->char 0))))
 	   (char->ascii c)))
+
+(define (encode-string str)
+  (list-ec (:string c str) (char->ascii c)))
 
 (define (encode-capabilities option-set)
   (encode-32Bit-integer (enum-set->integer option-set)))
@@ -310,14 +309,120 @@
    (encode-32Bit-integer max-packet-size)
    (encode-8Bit-integer charset)
    (make-null-bytes 23)
-   (encode-string user)
+   (encode-string-with-null user)
    (encode-password (encrypt-password password salt))))
+
+;;; old password algorithm
+;;;
+;;; After sending a protocol version 4.1 authentication message the
+;;; server wants us to send a message with password scrambled as in
+;;; protocol version 3.23...
+
+;;; pseudo number generator as used by MySQL
+
+(define-record-type random-seed :random-seed
+  (really-make-random-seed a b)
+  random-seed?
+  (a random-seed-a set-random-seed-a!)
+  (b random-seed-b set-random-seed-b!))
+
+(define random-max-number #x3FFFFFFF)
+
+(define (make-random-seed a b)
+  (really-make-random-seed (modulo a random-max-number)
+			   (modulo b random-max-number)))
+
+(define (random-number seed)
+  (set-random-seed-a! 
+   seed (modulo
+	 (mod2+ (mod2* (random-seed-a seed) 3)
+		(random-seed-b seed))
+	 random-max-number))
+  (set-random-seed-b! 
+   seed (modulo
+	 (mod2+ 33
+		(mod2+ (random-seed-a seed)
+		       (random-seed-b seed)))
+	 random-max-number))
+  (* 1.0 (/ (random-seed-a seed) random-max-number)))
+
+;;; pre 4.1 password hashing algorithm
+
+(define mask-32bits
+  (- (arithmetic-shift 1 31) 1))
+
+(define (hash-password password-bv)
+  (let ((len (byte-vector-length password-bv)))
+    (let lp ((i 0) (add 7) (nr 1345345333) (nr2 #x12345671))
+      (if (= i len)
+	  (values (bitwise-and nr mask-32bits) (bitwise-and nr2 mask-32bits))
+	  (let ((b (byte-vector-ref password-bv i)))
+	    (if (or (= b #x20) (= b #x09))  ; ignore whitespace and tab
+		(lp (+ i 1) add nr nr2)
+		(let* ((new-nr
+			(bitwise-xor nr
+				     (mod2+ (mod2* b (mod2+ add (bitwise-and nr 63)))
+					    (arithmetic-shift nr 8))))
+		       (new-nr2
+			(mod2+ nr2 (bitwise-xor new-nr (arithmetic-shift nr2 8)))))
+		  (lp (+ i 1) (mod2+ add b) new-nr new-nr2))))))))
+
+;;; pre 4.1 scrambling algorithm
+
+(define (scramble-password password-str message-str)
+  (let*-values
+      (((message-bv)  (string->byte-vector message-str))
+       ((password-bv) (string->byte-vector password-str))
+       ((hashed-pw-1 hashed-pw-2) (hash-password password-bv))
+       ((hashed-msg-1 hashed-msg-2) (hash-password message-bv))
+       ((init-1) (bitwise-xor hashed-pw-1 hashed-msg-1))
+       ((init-2) (bitwise-xor hashed-pw-2 hashed-msg-2))
+       ((seed) (make-random-seed init-1 init-2)))
+    (let* ((bv
+	    (byte-vector-ec (:byte-vector b message-bv)
+	      (mod2+ (floor-int (* (random-number seed) 31.0)) 64)))
+	   (extra (floor-int (* (random-number seed) 31.0))))
+      (byte-vector->string
+       (byte-vector-ec (:byte-vector b bv)
+	 (bitwise-xor b extra))))))
+
+(define (make-old-password-message seq-no password salt)
+  (make-single-message
+   seq-no
+   (encode-string-with-null (scramble-password password salt))))
 
 ;;; decoding result messages
 
 (define (simple-ok-response? bv)
   (and (= (byte-vector-length bv) 1)
        (= (byte-vector-ref bv 0) 254)))
+
+;;; commands
+
+(define-enumerated-type command :command
+  command?
+  commands
+  command-name
+  command-index
+  (sleep quit init-db query field-list
+   create-db drop-db refresh shutdown statistics
+   process-info connect process-kill debug ping
+   time delayed-insert change-user binlog-dump
+   table-dump connect-out register-slave
+   prepare execute long-data close-statement
+   reset-statement set-option))
+
+(define (encode-command-id command)
+  (encode-8Bit-integer (command-index command)))
+
+(define (make-command-message seq-no command query)
+  (make-single-message
+   seq-no
+   (encode-command-id command)
+   (encode-string query)))
+
+(define (make-query-message seq-no query)
+  (make-command-message seq-no (command init-db) query))
 
 (define (to-ip-address string-or-number)
   (cond
@@ -350,15 +455,25 @@
   (define greet 
     (read-server-greeting conn 60000))
 
+  (define user "eric")
+  
+  (define password "abc")
+
   (define auth-packet 
     (make-client-auth-message
      1
      standard-client-options
      (expt 2 24)
      8
-     "eric" "abc"
+     user password
      (greeting-salt greet)))
 
   (write-packet conn auth-packet)
   
-  (simple-ok-response? (read-packet conn 6000)))
+  (simple-ok-response? (read-packet conn 6000))
+  
+  (if password
+      (write-packet conn
+		    (make-old-password-message 3 password (greeting-salt greet))))
+
+  )
