@@ -38,6 +38,19 @@
 	byte-vectors)
   (files bytevec-42))
 
+;;; utils
+;;; #####
+
+(define-structure mysql-utils
+    (export string->byte-vector
+	    byte-vector->string
+	    mod2+ mod5+ mod2*
+	    floor-int)
+  (open scheme
+	srfi-42 srfi-42-byte-vectors
+	ascii)
+  (files util))
+
 ;;; mysql-low
 ;;; #########
 
