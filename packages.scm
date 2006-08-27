@@ -28,6 +28,16 @@
   (optimize auto-integrate)
   (files enum-set))
 
+;;; srfi-42-byte-vectors
+;;; ####################
+
+(define-structure srfi-42-byte-vectors
+    (export (byte-vector-ec :syntax)
+	    (:byte-vector :syntax))
+  (open scheme srfi-42
+	byte-vectors)
+  (files bytevec-42))
+
 ;;; mysql-low
 ;;; #########
 
