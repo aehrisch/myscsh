@@ -79,5 +79,6 @@
 (define-structure sha1 sha1-interface
   (open scheme
 	bitwise byte-vectors ascii 
+	mysql-utils
 	srfi-28)
   (files sha1))

@@ -157,15 +157,6 @@
    (else
     (bitwise-xor (bitwise-xor x y) z))))
 
-;;; code to add numbers modulo 2^32
-(define ring-size (expt 2 32))
-
-(define (mod2+ a b)
-  (modulo (+ a b) ring-size))
-
-(define (mod+ a b c d e)
-  (mod2+ (mod2+ (mod2+ (mod2+ a b) c) d) e))
-
 ;;; the SHA1 "constants"
 (define (sha1-constant i)
   (cond
@@ -200,11 +191,11 @@
     (if (= i 80)
 	(values a b c d e)
 	(lp (+ i 1)
-	    (mod+ (circular-shift-left a 5)
-		  (nonlinear-sha1-function i b c d)
-		  e
-		  (vector-ref extended-words i)
-		  (sha1-constant i))
+	    (mod5+ (circular-shift-left a 5)
+		   (nonlinear-sha1-function i b c d)
+		   e
+		   (vector-ref extended-words i)
+		   (sha1-constant i))
 	    a
 	    (circular-shift-left b 30)
 	    c
