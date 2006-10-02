@@ -110,24 +110,45 @@
 	(lp (string-append str (string (ascii->char (byte-vector-ref bv index))))
 	    (+ index 1)))))))
 
-(define (make-read-integer int-len)
+(define (read-fix-length-string bv start str-len)
+  (let ((bv-len (byte-vector-length bv)))
+    (if (> (+ start str-len) bv-len)
+	(error "Could not read fix length string" bv start str-len)
+	(values (string-ec (:range i start (+ start str-len))
+		  (ascii->char (byte-vector-ref bv i)))
+		(+ start str-len)))))
+
+(define (make-read-integer int-len return-next-offset?)
   (lambda (bv start)
     (if (> (+ start int-len) (byte-vector-length bv))
 	(error (format "Can't read integer (~a bytes) at index ~a" 
 		       int-len start bv)))
-    (sum-ec (:range i 0 int-len)
-      (arithmetic-shift (byte-vector-ref bv (+ start i))
-			(* 8 (+ start i))))))
+    (let ((int-value
+	   (sum-ec (:range i 0 int-len)
+	     (arithmetic-shift (byte-vector-ref bv (+ start i))
+			       (* 8 i))))) ;(+ start i))))))
+      (if return-next-offset?
+	  (values int-value (+ start int-len))
+	  int-value))))
 
-(define read-8Bit-integer (make-read-integer 1))
+;; read functions ending with * return two values: the integer read and
+;; the index of the field.  read functions without * just return the integer
+;; read.
 
-(define read-16Bit-integer (make-read-integer 2))
+(define read-8Bit-integer  (make-read-integer 1 #f))
+(define read-8Bit-integer* (make-read-integer 1 #t))
 
-(define read-24Bit-integer (make-read-integer 3))
+(define read-16Bit-integer  (make-read-integer 2 #f))
+(define read-16Bit-integer* (make-read-integer 2 #t))
 
-(define read-32Bit-integer (make-read-integer 4))
+(define read-24Bit-integer  (make-read-integer 3 #f))
+(define read-24Bit-integer* (make-read-integer 3 #t))
 
-(define read-64Bit-integer (make-read-integer 8))
+(define read-32Bit-integer  (make-read-integer 4 #f))
+(define read-32Bit-integer* (make-read-integer 4 #t))
+
+(define read-64Bit-integer  (make-read-integer 8 #f))
+(define read-64Bit-integer* (make-read-integer 8 #t))
 
 (define (copy-string-to-bv! bv str index)
   (do ((i index (+ i 1))
@@ -391,11 +412,250 @@
    seq-no
    (encode-string-with-null (scramble-password password salt))))
 
-;;; decoding result messages
-
-(define (simple-ok-response? bv)
+(define (request-for-old-password-message? bv)
   (and (= (byte-vector-length bv) 1)
        (= (byte-vector-ref bv 0) 254)))
+
+;;; read length encoded data
+
+(define (read-length-coded-binary packet start)
+  (if (>= start (byte-vector-length packet))
+      (error "Index out of range" packet start))
+  (let ((b (byte-vector-ref packet start)))
+    (cond
+     ((<= b 250) 
+      (values b (+ start 1)))
+     ((= b 251) 
+      (values #f (+ start 1)))
+     ((= b 252)
+      (values (read-16Bit-integer packet (+ start 1))
+	      (+ start 3)))
+     ((= b 253)
+      (values (read-32Bit-integer packet (+ start 1))
+	      (+ start 5)))
+     ((= b 254)
+      (values (read-64Bit-integer packet (+ start 1))
+	      (+ start 9)))
+     (else
+      (error "Can't decode length encoded binary" packet start b)))))
+
+(define (read-length-encoded-string packet start)
+  (let ((len (byte-vector-ref packet start)))
+    (if (>= (+ start len) (byte-vector-length packet))
+	(error "Length encoded string exceeds packet" packet start len))
+    (values (string-ec (:range i (+ start 1) (+ start 1 len))
+	      (ascii->char (byte-vector-ref packet i)))
+	    (+ start 1 len))))
+
+;;; recognize the strange packets of length 1
+
+(define (make-control-packet-recognizer b)
+  (lambda (packet)
+    (and (= (byte-vector-length packet) 1)
+	 (= (byte-vector-ref packet 0) b))))
+
+(define end-of-field-list-marker?
+  (make-control-packet-recognizer #xfe))
+
+(define no-rows-marker?
+  (make-control-packet-recognizer #xfb))
+
+;;; dispatch on the result packet type
+
+(define-record-type ok-packet :ok-packet
+  (make-ok-packet affected-rows insert-id
+		  server-status warning-count message)
+  ok-packet?
+  (affected-rows ok-packet-affected-rows)
+  (insert-id ok-packet-insert-id)
+  (server-status ok-packet-server-status)
+  (warning-count ok-packet-warning-count)
+  (message ok-packet-message))
+
+(define (could-be-ok-packet? packet)
+  (or (and (= (byte-vector-length packet) 1)
+	   (= (byte-vector-ref packet 0) 1))
+      (= (byte-vector-ref packet 0) #x0)))
+
+(define (parse-ok-packet packet start)
+  (if (= (byte-vector-length packet) 1)
+      (make-ok-packet #f #f #f #f #f)
+      (let*-values 
+	  (((field-count next)   (read-8Bit-integer* packet start)) ; always #x0
+	   ((affected-rows next) (read-length-coded-binary packet next))
+	   ((insert-id next)     (read-length-coded-binary packet next))
+	   ((server-status next) (read-16Bit-integer* packet next))
+	   ((warning-count next) (read-16Bit-integer* packet next))
+	   ((make-packet) (lambda (message)
+			    (make-ok-packet affected-rows insert-id
+					    server-status warning-count
+					    message))))
+	;; the message field is optional
+	(if (>= next (byte-vector-length packet))
+	    (make-packet #f)
+	    (call-with-values
+		(lambda ()
+		  (read-length-encoded-string packet next))
+	      (lambda (message next)
+		(make-packet message)))))))
+
+(define-record-type error-packet :error-packet
+  (make-error-packet errno sql-state message)
+  error-packet?
+  (errno error-packet-errno)
+  (sql-state error-packet-sql-state)
+  (message error-packet-message))
+
+(define (could-be-error-packet? packet)
+  (= (byte-vector-ref packet 0) #xff))
+
+(define (parse-error-packet packet start)
+  ;; The first nine bytes are always fix, the rest is a string which is
+  ;; not necessarily null-terminated.  Compute it's length.
+  (let ((message-len (- (byte-vector-length packet) 9)))
+    (let*-values
+	(((field-count next) (read-8Bit-integer* packet start))	; always #xff
+	 ((errno next)       (read-16Bit-integer* packet next))
+	 ((sql-marker next)  (read-8Bit-integer* packet next)) ; always #\#
+	 ((sql-state next)   (read-fix-length-string packet next 5))
+	 ((message next)     (read-fix-length-string packet next message-len)))
+      (make-error-packet errno sql-state message))))
+
+(define-record-type eof-packet :eof-packet
+  (make-eof-packet warning-count status-flags)
+  eof-packet?
+  (warning-count eof-packet-warning-count)
+  (status-flags eof-packet-status-flags))
+
+(define (could-be-eof-packet? packet)
+  (= (byte-vector-ref packet 0) #xfe))
+
+(define (parse-eof-packet packet start)
+  (cond
+   ((and (= (byte-vector-length packet) 1)
+	 (= (byte-vector-ref packet 0) #xfe))
+    (make-eof-packet #f #f))
+   (else
+    (let*-values
+	(((field-count next)   (read-8Bit-integer* packet start))	; always #xfe
+	 ((warning-count next) (read-16Bit-integer* packet next))
+	 ((status-flags next)  (read-16Bit-integer* packet next)))
+      (make-eof-packet warning-count status-flags)))))
+
+(define (old-style-eof-packet? p)
+  (and (eof-packet? p)
+       (not (eof-packet-warning-count p)) 
+       (not (eof-packet-status-flags p))))
+
+(define-record-type result-set-header-packet :result-set-header-packet
+  (make-result-set-header-packet field-count extra)
+  result-set-header-packet?
+  (field-count result-set-header-packet-field-count)
+  (extra result-set-header-packet-extra))
+
+(define (parse-result-set-header-packet packet start)
+  (let*-values
+      (((field-count next) (read-length-coded-binary packet start))
+       ((extra next) (read-length-coded-binary packet next)))
+    (make-result-set-header-packet field-count extra)))
+
+(define-record-type field-packet :field-packet
+  (make-field-packet catalog db table org-table
+		     name org-name
+		     charset length type
+		     flags decimals default)
+  field-packet?
+  (catalog field-packet-catalog)
+  (db field-packet-db)
+  (table field-packet-table)
+  (org-table field-packet-org-table)
+  (name field-packet-name)
+  (org-name field-packet-org-name)
+  (charset field-packet-charset)
+  (length field-packet-length)
+  (type field-packet-type)
+  (flags field-packet-flags)
+  (decimals field-packet-decimals)
+  (default field-packet-default))
+
+(define (parse-field-packet packet start)
+  (let*-values
+      (((catalog next)   (read-length-encoded-string packet start))
+       ((db next)        (read-length-encoded-string packet next))
+       ((table next)     (read-length-encoded-string packet next))
+       ((org-table next) (read-length-encoded-string packet next))
+       ((name next)      (read-length-encoded-string packet next))
+       ((org-name next)  (read-length-encoded-string packet next))
+       ;; now there is a filling byte, so skip one
+       ((next)		 (+ next 1))
+       ((charset next)   (read-16Bit-integer* packet next))
+       ((length next)    (read-32Bit-integer* packet next))
+       ((type next)      (read-8Bit-integer* packet next))
+       ((flags next)     (read-16Bit-integer* packet next))
+       ((decimals next)  (read-8Bit-integer* packet next))
+       ;; now there is another filling byte. skip one
+       ((next)           (+ next 1))
+       ((default next)   (read-length-coded-binary packet next)))
+    (make-field-packet catalog db table org-table name org-name
+		       next length type flags decimals default)))
+
+(define-record-type row-packet :row-packet
+  (make-row-packet columns)
+  row-packet?
+  (columns row-packet-columns))
+
+(define (parse-row-packet packet start)
+  (let ((len (byte-vector-length packet)))
+    (let lp ((index start) (columns '()))
+      (if (>= index len)
+	  (make-row-packet (reverse columns))
+	  (call-with-values
+	      (lambda ()
+		(read-length-encoded-string packet index))
+	    (lambda (str next)
+	      (lp next (cons str columns))))))))
+
+(define (read-field-packets conn timeout count)
+  (list-ec (:range i 1 count)
+	   (parse-field-packet (read-packet conn timeout) 0)))
+
+(define (read-row-contents-packets conn timeout)
+  (let lp ((p (read-packet conn timeout)) (contents '()))
+    (cond
+     ((could-be-eof-packet? p)
+      (values (reverse contents) (parse-eof-packet p 0)))
+     ((no-rows-marker? p)
+      (let ((should-be-eof-packet (read-packet conn timeout)))
+	(values (parse-eof-packet should-be-eof-packet 0) '())))
+     (else
+      (lp (read-packet conn timeout)
+	  (cons (parse-row-packet p 0) contents))))))
+
+(define (read-field-packets conn timeout)
+  (let lp ((p (read-packet conn timeout)) (fields '()))
+    (cond
+     ((could-be-eof-packet? p)
+      (values (reverse fields) (parse-eof-packet p 0)))
+     (else
+      (lp (read-packet conn timeout)
+	  (cons (parse-field-packet p 0) fields))))))
+
+(define (parse-tabular-response conn timeout)
+  (let ((p (read-packet conn timeout)))
+    (let*-values 
+	(((fields eof-1) (read-field-packets conn timeout))
+	 ((rows   eof-2) (read-row-contents-packets conn timeout)))
+      (list fields eof-1 rows eof-2))))
+
+(define (read/parse-response conn timeout)
+  (let ((p (read-packet conn timeout)))
+    (cond
+     ((could-be-ok-packet? p)
+      (parse-ok-packet p 0))
+     ((could-be-error-packet? p)
+      (parse-error-packet p 0))
+     (else
+      (byte-vector-ref p 0)))))
 
 ;;; commands
 
@@ -420,9 +680,6 @@
    seq-no
    (encode-command-id command)
    (encode-string query)))
-
-(define (make-query-message seq-no query)
-  (make-command-message seq-no (command init-db) query))
 
 (define (to-ip-address string-or-number)
   (cond
@@ -452,8 +709,10 @@
   (define conn 
     (open-mysql-tcp-connection "localhost" 3306))
 
+  (define timeout 6000)
+
   (define greet 
-    (read-server-greeting conn 60000))
+    (read-server-greeting conn timeout))
 
   (define user "eric")
   
@@ -469,11 +728,40 @@
      (greeting-salt greet)))
 
   (write-packet conn auth-packet)
-  
-  (simple-ok-response? (read-packet conn 6000))
+
+  (read-packet conn timeout)
   
   (if password
       (write-packet conn
 		    (make-old-password-message 3 password (greeting-salt greet))))
+
+  (read-packet conn timeout)
+
+  (write-packet conn
+		(make-command-message 0 (command query) "SELECT DATABASE()"))
+
+  (let ((parsed-packet (read/parse-response conn timeout)))
+    (if (ok-packet? parsed-packet)
+	(parse-tabular-response conn timeout)
+	(error "Query failed" parsed-packet)))
+
+  (write-packet conn
+		(make-command-message 0 (command init-db) "mysql"))
+
+  (let ((parsed-packet (read/parse-response conn timeout)))
+    (if (not (ok-packet? parsed-packet))
+	(error "Init DB failed" parsed-packet)))
+
+  (write-packet conn
+		(make-command-message 0 (command query) "SELECT * FROM user"))
+
+  (let ((parsed-packet (read/parse-response conn timeout)))
+    (cond
+     ((number? parsed-packet)
+      (parse-tabular-response conn timeout))
+     ((error-packet? parsed-packet)
+      (error "Query 2 failed" parsed-packet))
+     (else
+      (error "Confused" parsed-packet))))
 
   )
