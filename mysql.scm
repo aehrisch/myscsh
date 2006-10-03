@@ -747,10 +747,6 @@
 	    (lambda (str next)
 	      (lp next (cons str columns))))))))
 
-(define (read-field-packets conn timeout count)
-  (list-ec (:range i 1 count)
-	   (parse-field-packet (read-packet conn timeout) 0)))
-
 (define (read-row-contents-packets conn timeout)
   (let lp ((p (read-packet conn timeout)) (contents '()))
     (cond
