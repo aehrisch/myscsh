@@ -447,6 +447,133 @@
 	      (ascii->char (byte-vector-ref packet i)))
 	    (+ start 1 len))))
 
+;;; Given a number (i.e. the ID field), find the corresponding
+;;; instance of a finite type.
+
+(define-syntax define-finite-type-constructor
+  (syntax-rules ()
+    ((define-finite-type-constructor elements-vector id name)
+     (define name 
+       (let ((alist (map (lambda (elem)
+			   (cons (id elem) elem))
+			 (vector->list elements-vector))))
+	 (lambda (num)
+	   (cond
+	    ((assoc num alist)
+	     => cdr)
+	    (else
+	     (error "No instance of finite type" num)))))))))
+
+;;; field types
+
+(define-finite-type field-type :field-type
+  (id)
+  field-type?
+  field-type-elements
+  field-type-name
+  field-type-index
+  (id field-type-id)
+  ((decimal	0)	(tiny	1)	(short	   2)
+   (long	3)	(float	4)	(double    5)
+   (null	6)	(timestamp 7)	(long-long 8)
+   (int-24	9)	(date   10)	(time      11)
+   (date-time	12)	(year	13)	(new-date  14)
+   (enum	247)	(set    248)	(tiny-blob 249)
+   (medium-blob 250)	(long-blob 251) (blob      252)
+   (var-string  253)	(string 254)    (geometry  255)))
+
+(define-finite-type-constructor field-type-elements 
+  field-type-id make-field-type-from-number)
+
+;;; charsets
+
+(define-finite-type charset :charset
+  (id)
+  charset?
+  charset-elements
+  charset-name
+  charset-index
+  (id charset-id)
+  ((big5-chinese-ci        1)   (latin1-general-cs  49)
+   (latin2-czech-cs        2)   (cp1251-bin         50)
+   (dec8-swedish-ci        3)   (cp1251-general-ci  51)
+   (cp850-general-ci       4)   (cp1251-general-cs  52)
+   (latin1-german1-ci      5)   (macroman-bin       53)
+   (hp8-english-ci         6)   (macroman-ci        54)
+   (koi8r-general-ci       7)   (macroman-ci-ai     55)
+   (latin1-swedish-ci      8)   (macroman-cs        56)
+   (latin2-general-ci      9)   (cp1256-general-ci  57)
+   (swe7-swedish-ci        10)  (cp1257-bin         58)
+   (ascii-general-ci       11)  (cp1257-general-ci  59)
+   (ujis-japanese-ci       12)  (cp1257-ci          60)
+   (sjis-japanese-ci       13)  (cp1257-cs          61)
+   (cp1251-bulgarian-ci    14)  (binary             63)
+   (latin1-danish-ci       15)  (armscii8-bin       64)
+   (hebrew-general-ci      16)  (ascii-bin          65)
+   (tis620-thai-ci         18)  (cp1250-bin         66)
+   (euckr-korean-ci        19)  (cp1256-bin         67)
+   (latin7-estonian-cs     20)  (cp866-bin          68)
+   (latin2-hungarian-ci    21)  (dec8-bin           69)
+   (koi8u-general-ci       22)  (greek-bin          70)
+   (cp1251-ukrainian-ci    23)  (hebrew-bin         71)
+   (gb2312-chinese-ci      24)  (hp8-bin            72)
+   (greek-general-ci       25)  (keybcs2-bin        73)
+   (cp1250-general-ci      26)  (koi8r-bin          74)
+   (latin2-croatian-ci     27)  (koi8u-bin          75)
+   (gbk-chinese-ci         28)  (latin2-bin         77)
+   (cp1257-lithuanian-ci   29)  (latin5-bin         78)
+   (latin5-turkish-ci      30)  (latin7-bin         79)
+   (latin1-german2-ci      31)  (cp850-bin          80)
+   (armscii8-general-ci    32)  (cp852-bin          81)
+   (utf8-general-ci        33)  (swe7-bin           82)
+   (cp1250-czech-cs        34)  (utf8-bin           83)
+   (ucs2-general-ci        35)  (big5-bin           84)
+   (cp866-general-ci       36)  (euckr-bin          85)
+   (keybcs2-general-ci     37)  (gb2312             86)
+   (macce-general-ci       38)  (gbk-bin            87)
+   (macroman-general-ci    39)  (sjis-bin           88)
+   (cp852-general-ci       40)  (tis620-bin         89)
+   (latin7-general-ci      41)  (ucs2-bin           90)
+   (latin7-general-cs      42)  (ujis-bin           91)
+   (macce-bin              43)  (geostd8-general-ci 92)
+   (latin1-bin             47)  (geostd8-bin        93)
+   (latin1-general-ci      48)  (latin1-spanish-ci  94)))
+
+(define-finite-type-constructor charset-elements 
+  charset-id make-charset-from-number)
+
+;;; status codes
+
+(define-enumerated-type status-code :status-code
+  status-code?
+  status-codes
+  status-code-name
+  status-code-index
+  (in-transaction auto-commit more-results more-results-exist
+   no-good-index-exists db-dropped))
+
+(define-enum-set-type status-code-set :status-code-set
+  status-code-set?
+  make-status-code-set
+  status-code status-code? status-codes status-code-index)
+
+;;; field flags
+
+(define-enumerated-type field-flag :field-flag
+  field-flag?
+  field-flags
+  field-flag-name
+  field-flag-index
+  (not-null primary-key unique-key multiple-key blob
+   unsigned zero-fill binary enum auto-increment
+   timestamp set unused-1 unused-2 partial-key group
+   unique bincmp))
+
+(define-enum-set-type field-flag-set :field-flag-set
+  field-flag-set?
+  make-field-flag-set
+  field-flag field-flag? field-flags field-flag-index)
+
 ;;; recognize the strange packets of length 1
 
 (define (make-control-packet-recognizer b)
@@ -540,7 +667,8 @@
 	(((field-count next)   (read-8Bit-integer* packet start))	; always #xfe
 	 ((warning-count next) (read-16Bit-integer* packet next))
 	 ((status-flags next)  (read-16Bit-integer* packet next)))
-      (make-eof-packet warning-count status-flags)))))
+      (make-eof-packet warning-count 
+		       (integer->enum-set :status-code-set status-flags))))))
 
 (define (old-style-eof-packet? p)
   (and (eof-packet? p)
@@ -597,7 +725,11 @@
        ((next)           (+ next 1))
        ((default next)   (read-length-coded-binary packet next)))
     (make-field-packet catalog db table org-table name org-name
-		       next length type flags decimals default)))
+		       (make-charset-from-number charset)
+		       length 
+		       (make-field-type-from-number type)
+		       (integer->enum-set :field-flag-set flags)
+		       decimals default)))
 
 (define-record-type row-packet :row-packet
   (make-row-packet columns)
