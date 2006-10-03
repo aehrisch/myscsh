@@ -769,11 +769,10 @@
 	  (cons (parse-field-packet p 0) fields))))))
 
 (define (parse-tabular-response conn timeout)
-  (let ((p (read-packet conn timeout)))
-    (let*-values 
-	(((fields eof-1) (read-field-packets conn timeout))
-	 ((rows   eof-2) (read-row-contents-packets conn timeout)))
-      (list fields eof-1 rows eof-2))))
+  (let*-values 
+      (((fields eof-1) (read-field-packets conn timeout))
+       ((rows   eof-2) (read-row-contents-packets conn timeout)))
+    (list fields eof-1 rows eof-2)))
 
 (define (read/parse-response conn timeout)
   (let ((p (read-packet conn timeout)))
