@@ -891,4 +891,32 @@
      (else
       (error "Confused" parsed-packet))))
 
+  (write-packet conn
+		(make-command-message 0 (command query)
+				      "CREATE TABLE tab1 (i INT, s VARCHAR(255))"))
+  (let ((parsed-packet (read/parse-response conn timeout)))
+    (if (not (ok-packet? parsed-packet))
+	(error "Query 3 failed" parsed-packet)))
+
+  (write-packet conn
+		(make-command-message 0 (command query)
+				      "INSERT INTO tab1 VALUES(42, \"Hallo Welt!\")"))
+
+  (let ((parsed-packet (read/parse-response conn timeout)))
+    (if (not (ok-packet? parsed-packet))
+	(error "Query 4 failed" parsed-packet)))
+
+  (write-packet conn
+		(make-command-message 0 (command query)
+				      "SELECT * FROM tab1"))
+  
+  (let ((parsed-packet (read/parse-response conn timeout)))
+    (cond
+     ((number? parsed-packet)
+      (parse-tabular-response conn timeout))
+     ((error-packet? parsed-packet)
+      (error "Query 5 failed" parsed-packet))
+     (else
+      (error "Confused" parsed-packet))))
+
   )
