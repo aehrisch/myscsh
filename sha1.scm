@@ -169,7 +169,7 @@
   (let ((as-hex (lambda (v)
 		  (number->string v 16))))
     (display
-     (format "~a\t ~a  ~a  ~a  ~a  ~a"
+     (format "~a    ~a  ~a  ~a  ~a  ~a"
 	     i
 	     (as-hex a) (as-hex b) (as-hex c)
 	     (as-hex d) (as-hex e)))
