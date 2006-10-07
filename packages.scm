@@ -51,12 +51,29 @@
 	ascii)
   (files util))
 
+;;; mysql-connection
+;;; ################
+
+(define-interface mysql-connection-interface
+  (export open-tcp-connection
+	  write-string
+	  force-output))
+
+;;; The mysql-connection for the scsh API
+
+(define-structure mysql-connection-scsh mysql-connection-interface
+  (open scheme-with-scsh
+	srfi-23)
+  (files net-scsh))
+
+(define mysql-connection mysql-connection-scsh)
+
 ;;; mysql-low
 ;;; #########
 
 (define-structure mysql-low (export)
-  (open (modify scheme-with-scsh
-		(hide format))
+  (open scheme
+	mysql-connection
 	define-record-types
 	finite-types enum-sets enum-sets-internal
 	ascii bitwise byte-vectors

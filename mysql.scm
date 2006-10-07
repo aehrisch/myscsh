@@ -768,27 +768,14 @@
    (encode-command-id command)
    (encode-string query)))
 
-(define (to-ip-address string-or-number)
-  (cond
-   ((string? string-or-number)
-    (car (host-info:addresses (host-info string-or-number))))
-   ((number? string-or-number)
-    string-or-number)
-   (else
-    (error "Can't resolve this" string-or-number))))
-
 (define (open-mysql-tcp-connection host port)
-  (let ((sock
-	 (create-socket protocol-family/internet
-			socket-type/stream))
-	(sock-addr
-	 (internet-address->socket-address 
-	  (to-ip-address host) port)))
-    (connect-socket sock sock-addr)
-    (make-connection
-     sock
-     (socket:inport sock)
-     (socket:outport sock))))
+  ;; There are two implementations of OPEN-TCP-CONNECTION: One for
+  ;; scsh and one for Scheme 48
+  (call-with-values
+      (lambda ()
+	(open-tcp-connection host port))
+    (lambda (sock in-port out-port)
+      (make-connection sock in-port out-port))))
 
 ;;; test code
 (define (do-login)
