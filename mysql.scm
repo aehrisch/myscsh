@@ -8,39 +8,9 @@
   (in-port connection-in-port)
   (out-port connection-out-port))
 
-(define (port->channel port)
-  (let ((ch (make-channel)))
-    (spawn (lambda ()
-	     (let lp ()
-	       (send ch (read-char port))
-	       (lp))))
-    ch))
-
-(define (make-timeout-rv time)
-  (let ((ch (make-channel)))
-    (spawn (lambda ()
-	     (sleep time)
-	     (send ch 'ignore-me)))
-    (receive-rv ch)))
-
-(define (read-n-bytes-with-timeout channel count timeout)
-  (apply values
-	 (let ((bv (make-byte-vector count 0))
-	       (timeout-rv (make-timeout-rv timeout)))
-	   (let lp ((idx 0))
-	     (cond
-	      ((= idx count)
-	       (list bv count))
-	      (else
-	       (select
-		(wrap (receive-rv channel)
-		      (lambda (c)
-			(byte-vector-set!
-			 bv idx (char->ascii c))
-			(lp (+ idx 1))))
-		(wrap timeout-rv
-		      (lambda (ignored)
-			(list bv count))))))))))
+(define (read-n-bytes in-port count)
+  (byte-vector-ec (:range i 0 count)
+    (char->ascii (read-char in-port))))
 
 (define (parse-packet-header bv)
   (values
@@ -49,31 +19,21 @@
    ;; packet sequence number
    (read-8Bit-integer bv 3)))
 
-(define (read-packet-header channel timeout)
-  (let ((header-len 4))
-    (call-with-values
-	(lambda ()
-	  (read-n-bytes-with-timeout channel header-len timeout))
-      (lambda (bv count)
-	(cond
-	 ((= count header-len)
-	  (parse-packet-header bv))
-	 (else
-	  (error "timeout")))))))
+(define (read-packet-header in-port)
+  (let* ((header-len 4)
+	 (bv (read-n-bytes in-port header-len)))
+    (parse-packet-header bv)))
 
-(define (read-packet conn timeout)
-  (let ((channel (connection-in-port conn)))
+(define (read-packet conn)
+  (let ((in-port (connection-in-port conn)))
     (call-with-values
 	(lambda ()
-	  (read-packet-header channel timeout))
+	  (read-packet-header in-port))
       (lambda (body-len packet-no)
-	(call-with-values
-	    (lambda ()
-	      (read-n-bytes-with-timeout channel body-len timeout))
-	  (lambda (bv read)
-	    (if (not (= read body-len))
-		(error "Corrupted package" read body-len))
-	    bv))))))
+	(let ((bv (read-n-bytes in-port body-len)))
+	  (if (not (= body-len (byte-vector-length bv)))
+	      (error "Corrupted package" read body-len))
+	  bv)))))
 
 (define (format-byte byte)
   (let ((str (number->string byte 16)))
@@ -191,8 +151,8 @@
   (status greeting-status)
   (rest-salt greeting-rest-salt))
 
-(define (read-server-greeting conn timeout)
-  (let* ((bv (read-packet conn timeout))
+(define (read-server-greeting conn)
+  (let* ((bv (read-packet conn))
 	 (proto-ver (read-8Bit-integer bv 0)))
     (if (not (= 10 proto-ver))
 	(error "Unsupported protocol version" proto-ver))
@@ -747,35 +707,35 @@
 	    (lambda (str next)
 	      (lp next (cons str columns))))))))
 
-(define (read-row-contents-packets conn timeout)
-  (let lp ((p (read-packet conn timeout)) (contents '()))
+(define (read-row-contents-packets conn)
+  (let lp ((p (read-packet conn)) (contents '()))
     (cond
      ((could-be-eof-packet? p)
       (values (reverse contents) (parse-eof-packet p 0)))
      ((no-rows-marker? p)
-      (let ((should-be-eof-packet (read-packet conn timeout)))
+      (let ((should-be-eof-packet (read-packet conn)))
 	(values (parse-eof-packet should-be-eof-packet 0) '())))
      (else
-      (lp (read-packet conn timeout)
+      (lp (read-packet conn)
 	  (cons (parse-row-packet p 0) contents))))))
 
-(define (read-field-packets conn timeout)
-  (let lp ((p (read-packet conn timeout)) (fields '()))
+(define (read-field-packets conn)
+  (let lp ((p (read-packet conn)) (fields '()))
     (cond
      ((could-be-eof-packet? p)
       (values (reverse fields) (parse-eof-packet p 0)))
      (else
-      (lp (read-packet conn timeout)
+      (lp (read-packet conn)
 	  (cons (parse-field-packet p 0) fields))))))
 
-(define (parse-tabular-response conn timeout)
+(define (parse-tabular-response conn)
   (let*-values 
-      (((fields eof-1) (read-field-packets conn timeout))
-       ((rows   eof-2) (read-row-contents-packets conn timeout)))
+      (((fields eof-1) (read-field-packets conn))
+       ((rows   eof-2) (read-row-contents-packets conn)))
     (list fields eof-1 rows eof-2)))
 
-(define (read/parse-response conn timeout)
-  (let ((p (read-packet conn timeout)))
+(define (read/parse-response conn)
+  (let ((p (read-packet conn)))
     (cond
      ((could-be-ok-packet? p)
       (parse-ok-packet p 0))
@@ -827,7 +787,7 @@
     (connect-socket sock sock-addr)
     (make-connection
      sock
-     (port->channel (socket:inport sock))
+     (socket:inport sock)
      (socket:outport sock))))
 
 ;;; test code
@@ -836,10 +796,8 @@
   (define conn 
     (open-mysql-tcp-connection "localhost" 3306))
 
-  (define timeout 6000)
-
   (define greet 
-    (read-server-greeting conn timeout))
+    (read-server-greeting conn))
 
   (define user "eric")
   
@@ -856,36 +814,36 @@
 
   (write-packet conn auth-packet)
 
-  (read-packet conn timeout)
+  (read-packet conn)
   
   (if password
       (write-packet conn
 		    (make-old-password-message 3 password (greeting-salt greet))))
 
-  (read-packet conn timeout)
+  (read-packet conn)
 
   (write-packet conn
 		(make-command-message 0 (command query) "SELECT DATABASE()"))
 
-  (let ((parsed-packet (read/parse-response conn timeout)))
+  (let ((parsed-packet (read/parse-response conn)))
     (if (ok-packet? parsed-packet)
-	(parse-tabular-response conn timeout)
+	(parse-tabular-response conn)
 	(error "Query failed" parsed-packet)))
 
   (write-packet conn
 		(make-command-message 0 (command init-db) "mysql"))
 
-  (let ((parsed-packet (read/parse-response conn timeout)))
+  (let ((parsed-packet (read/parse-response conn)))
     (if (not (ok-packet? parsed-packet))
 	(error "Init DB failed" parsed-packet)))
 
   (write-packet conn
 		(make-command-message 0 (command query) "SELECT * FROM user"))
 
-  (let ((parsed-packet (read/parse-response conn timeout)))
+  (let ((parsed-packet (read/parse-response conn)))
     (cond
      ((number? parsed-packet)
-      (parse-tabular-response conn timeout))
+      (parse-tabular-response conn))
      ((error-packet? parsed-packet)
       (error "Query 2 failed" parsed-packet))
      (else
@@ -894,7 +852,7 @@
   (write-packet conn
 		(make-command-message 0 (command query)
 				      "CREATE TABLE tab1 (i INT, s VARCHAR(255))"))
-  (let ((parsed-packet (read/parse-response conn timeout)))
+  (let ((parsed-packet (read/parse-response conn)))
     (if (not (ok-packet? parsed-packet))
 	(error "Query 3 failed" parsed-packet)))
 
@@ -902,7 +860,7 @@
 		(make-command-message 0 (command query)
 				      "INSERT INTO tab1 VALUES(42, \"Hallo Welt!\")"))
 
-  (let ((parsed-packet (read/parse-response conn timeout)))
+  (let ((parsed-packet (read/parse-response conn)))
     (if (not (ok-packet? parsed-packet))
 	(error "Query 4 failed" parsed-packet)))
 
@@ -910,10 +868,10 @@
 		(make-command-message 0 (command query)
 				      "SELECT * FROM tab1"))
   
-  (let ((parsed-packet (read/parse-response conn timeout)))
+  (let ((parsed-packet (read/parse-response conn)))
     (cond
      ((number? parsed-packet)
-      (parse-tabular-response conn timeout))
+      (parse-tabular-response conn))
      ((error-packet? parsed-packet)
       (error "Query 5 failed" parsed-packet))
      (else

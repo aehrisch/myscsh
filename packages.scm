@@ -56,14 +56,12 @@
 
 (define-structure mysql-low (export)
   (open (modify scheme-with-scsh
-		(hide select format))
+		(hide format))
 	define-record-types
-	threads
 	finite-types enum-sets enum-sets-internal
 	ascii bitwise byte-vectors
 
 	mysql-utils sha1
-	rendezvous rendezvous-channels
 	srfi-42 srfi-42-byte-vectors
 	srfi-11 srfi-23 srfi-28)
   (files mysql))
