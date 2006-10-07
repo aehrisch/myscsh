@@ -1,3 +1,5 @@
+;;; Copyright (c) 2006 by Eric Knauel. See file COPYING.
+
 ;;; make a mask with COUNT 1 bits shifted START bits left
 (define (make-extract-mask start count)
   (let lp ((count count) (mask 0))

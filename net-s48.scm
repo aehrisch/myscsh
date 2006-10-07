@@ -1,3 +1,5 @@
+;;; Copyright (c) 2006 by Eric Knauel. See file COPYING.
+
 (define (write-string str port)
   (do-ec (:string c str)
     (write-char c port)))

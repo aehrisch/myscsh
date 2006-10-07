@@ -1,3 +1,5 @@
+;;; Copyright (c) 2006 by Eric Knauel. See file COPYING.
+
 (define (msg . args)
   (display (apply format args)))
 

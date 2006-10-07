@@ -1,3 +1,5 @@
+;;; Copyright (c) 2006 by Eric Knauel. See file COPYING.
+
 (define (string->byte-vector str)
   (byte-vector-ec (:string c str)
     (char->ascii c)))

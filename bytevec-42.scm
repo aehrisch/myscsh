@@ -1,3 +1,5 @@
+;;; Copyright (c) 2006 by Eric Knauel. See file COPYING.
+
 (define-syntax byte-vector-ec
   (syntax-rules ()
     ((byte-vector-ec etc1 etc ...)

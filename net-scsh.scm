@@ -1,3 +1,5 @@
+;;; Copyright (c) 2006 by Eric Knauel. See file COPYING.
+
 (define (to-ip-address string-or-number)
   (cond
    ((string? string-or-number)
