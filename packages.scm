@@ -80,12 +80,74 @@
 	i/o sockets)
   (files net-s48))
 
-(define mysql-connection mysql-connection-s48)
+(define mysql-connection mysql-connection-scsh)
 
 ;;; mysql-low
 ;;; #########
 
-(define-structure mysql-low (export)
+(define-interface mysql-low-interface
+  (export connection? open-mysql-tcp-connection
+	  read-packet print-packet
+	  write-packet
+	  
+	  (client-option :syntax)
+	  client-option? client-options client-option-name
+	  standard-client-options
+	  make-option-set option-set?
+
+	  read-server-greeting greeting?
+	  greeting-protocol-ver greeting-server-ver
+	  greeting-thread-id greeting-salt greeting-capabilities
+	  greeting-charset greeting-status greeting-rest-salt
+
+	  make-client-auth-message
+	  make-old-password-message
+
+	  (field-type :syntax)
+	  field-type? field-type-elements field-type-name
+
+	  (charset :syntax)
+	  charset? charset-elements charset-name
+
+	  (status-code :syntax)
+	  status-code? status-codes status-code-name
+	  make-status-code-set status-code-set?
+
+	  (command :syntax)
+	  command? commands command-name
+	  make-command-message
+	  
+	  ok-packet? parse-ok-packet
+	  ok-packet-affected-rows ok-packet-insert-id
+	  ok-packet-server-status ok-packet-warning-count
+	  ok-packet-message
+
+	  error-packet? parse-error-packet
+	  error-packet-errno error-packet-sql-state
+	  error-packet-message
+
+	  eof-packet? parse-eof-packet
+	  eof-packet-warning-count eof-packet-status-flags
+	  old-style-eof-packet?
+
+	  parse-result-set-header-packet
+
+	  field-packet? parse-field-packet
+	  field-packet-catalog field-packet-db
+	  field-packet-table field-packet-org-table
+	  field-packet-name field-packet-org-name
+	  field-packet-charset field-packet-length
+	  field-packet-type field-packet-flags
+	  field-packet-decimals field-packet-default
+
+	  row-packet? parse-row-packet
+	  row-packet-columns
+	  
+	  parse-tabular-response
+	  read/parse-response))
+
+(define-structure mysql-low
+    mysql-low-interface
   (open scheme
 	mysql-connection
 	define-record-types
