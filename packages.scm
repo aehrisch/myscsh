@@ -59,14 +59,22 @@
 	  write-string
 	  force-output))
 
-;;; The mysql-connection for the scsh API
+;;; The mysql-connection module for the scsh API
 
 (define-structure mysql-connection-scsh mysql-connection-interface
   (open scheme-with-scsh
 	srfi-23)
   (files net-scsh))
 
-(define mysql-connection mysql-connection-scsh)
+;;; The mysql-connection module for the Scheme 48 API
+
+(define-structure mysql-connection-s48 mysql-connection-interface
+  (open scheme 
+	srfi-42
+	i/o sockets)
+  (files net-s48))
+
+(define mysql-connection mysql-connection-s48)
 
 ;;; mysql-low
 ;;; #########
