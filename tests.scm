@@ -1,3 +1,12 @@
+;;; test cases (SRFI-78) for SHA-1
+;;; 
+;;; taken from:
+;;;   Federal Information Processing Standard Publication 180-1
+;;;   Secure Hash Standard
+;;;   April 1995
+;;; available from
+;;;    <http://www.itl.nist.gov/fipspubs/fip180-1.htm>
+
 (check 
  (sha1-hash-string "")
  => #xda39a3ee5e6b4b0d3255bfef95601890afd80709)
