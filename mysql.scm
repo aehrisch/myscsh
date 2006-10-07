@@ -2,10 +2,10 @@
   (display (apply format args)))
 
 (define-record-type connection :connection
-  (make-connection socket in-channel out-port)
+  (make-connection socket in-port out-port)
   connection?
   (socket connection-socket)
-  (in-channel connection-in-channel)
+  (in-port connection-in-port)
   (out-port connection-out-port))
 
 (define (port->channel port)
@@ -62,7 +62,7 @@
 	  (error "timeout")))))))
 
 (define (read-packet conn timeout)
-  (let ((channel (connection-in-channel conn)))
+  (let ((channel (connection-in-port conn)))
     (call-with-values
 	(lambda ()
 	  (read-packet-header channel timeout))
