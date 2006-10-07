@@ -67,6 +67,10 @@
   (files net-scsh))
 
 ;;; The mysql-connection module for the Scheme 48 API
+;;;
+;;; Comment out the definition for mysql-connection-scsh if you are
+;;; using Scheme 48 since there isn't a scheme-with-scsh module in
+;;; Scheme 48.  And vice versa: scsh doesn't have i/o nor sockets.
 
 (define-structure mysql-connection-s48 mysql-connection-interface
   (open scheme 
