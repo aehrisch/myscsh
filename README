@@ -1,0 +1,125 @@
+Myscsh README                                           -*- outline -*-
+
+                                                Tuebingen, October 2006
+
+
+                                Myscsh
+                                ======
+
+* What is Myscsh?
+
+  Myscsh is an implementation of the MySQL client/server protocol
+  written entirely in Scheme.  This package provides functions to
+  connect to a MySQL database server, authenticate, send queries, and
+  receive and parse result sets.  The API is quite low-level: it's
+  just about reading and parsing messages and sending messages.
+  Future versions of Myscsh will include a higher-level API for
+  convenient database programming.  Myscsh implements the MySQL 4.1
+  protocol (which has the internal protocol version number 10) and has
+  been tested in conjunction with a MySQL 4.1 server on Linux.  It
+  might work with a 5.x server as well, but that's completely
+  untested.  It won't work with 3.20 servers, that's for sure.
+
+  Using the low-level API of Myscsh requires a bit of knowledge of the
+  MySQL client/server protocol. There are several documents[1,2]
+  describing the protocol.  These documents have been very helpful
+  while developing Myscsh.
+
+* Why an implementation of the protocol?
+
+  An alternative approach for connecting to MySQL is to use the
+  functions the C library libmysqlclient.so provides.  A lot of
+  language implementation provide bindings to this library.  So this
+  is a well-tested approach.  However, here are some reasons for
+  implementing the protocol in Scheme:
+
+    o No C code to compile, no header files to search for, no shared
+      libraries to search for, and no dynamic modules to load.  Less
+      high-tech, less trouble.
+
+    o In scsh and Scheme 48, calling C function from Scheme blocks the
+      whole Scheme system until the C function returns.  Hence,
+      sending a complex query to MySQL using the corresponding C
+      function will stop all Scheme threads until the SQL result is
+      available.  This is not acceptable, especially since the SQL
+      queries may take seconds to compute.  There is no easy to fix
+      this.
+
+    o The Scheme code is quite portable and could be used by other
+      Scheme implementations.  The code only uses very few Scheme 48
+      or scsh specific features, i. e. for network connections.
+
+    o Writing C bindings is boring.  I have written too much C
+      bindings in the past years.
+
+  Implementing the protocol is not a particular original idea: For
+  example, there is a Ruby implementation of the 3.20 protocol.
+
+* Requirements and installation
+
+  I developed and tested Myscsh on Scheme 48 1.3[3] and scsh 0.6.7[4]
+  and should work without right out of the box with these
+  implementations.
+
+  There is no special installation procedure.  The only thing to do is
+  open "packages.scm" in an editor, search for this line:
+
+    (define mysql-connection mysql-connection-scsh)
+
+  and change it to 
+
+    (define mysql-connection mysql-connection-s48)
+
+  when you are using Scheme 48, or, for scsh users, leave it
+  untouched.  You may want to comment out the unused package
+  definition "mysql-connection-s48" when you are using scsh (and vice
+  versa) to prevent the system from writing some uninteresting warning
+  messages about undefined packages.  Yes, that's a hack.
+
+* Source code repository
+
+  The latest version of the source code resides in a darcs[5]
+  repository at this address:
+
+  <http://www-pu.informatik.uni-tuebingen.de/users/knauel/sw/myscsh/>
+
+* Known bugs, limitations
+
+  Some things that may cause trouble:
+
+    o The code completely ignore characters encoding issues.  It just
+      assumes that the character encoding the Scheme system is using
+      is the right one for communicating with the server.  This works
+      in many cases, but is a bad idea in principal.
+
+  Some things that have not been implemented or tested yet:
+
+    o receiving result sets that contain binary values
+    o prepared statements, parameter messages, and long data packets
+    o compression
+
+* Future work
+
+  o Write some documentation
+  o Add a high-level API for convenient database programming
+  o Better error-handling using SRFI 34 and SRFI 35
+
+* Bug reports, questions, patches, and author's address:
+
+  Please send bug reports, questions, patches directly to the author
+  of Myscsh
+
+    Eric Knauel
+    knauel@informatik.uni-tuebingen.de
+
+  or to the scsh mailing-list:
+
+    scsh-users@scsh.net
+
+-- 
+Footnotes: 
+[1]  <http://dev.mysql.com/doc/internals/en/client-server-protocol.html>
+[2]  <http://www.redferni.uklinux.net/mysql/MySQL-Protocol.html>
+[3]  <http://www.s48.org/>
+[4]  <http://www.scsh.net/>
+[5]  <http://www.darcs.net/>
